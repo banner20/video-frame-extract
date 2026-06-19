@@ -11,9 +11,19 @@ const TRANSITIONS = [
   { id: 'zoom-in',     label: 'Zoom In',      dur: 0.7 },
 ]
 
-function mkTr(type) {
+const CANVAS_PRESETS = [
+  { id: '16:9-hd',  label: '16:9  HD',       w: 1280, h: 720  },
+  { id: '16:9-fhd', label: '16:9  FHD',      w: 1920, h: 1080 },
+  { id: '9:16',     label: '9:16  Vertical',  w: 720,  h: 1280 },
+  { id: '1:1',      label: '1:1  Square',     w: 1080, h: 1080 },
+  { id: '4:3',      label: '4:3  Classic',    w: 1024, h: 768  },
+]
+
+const CARD_WIDTHS = { small: 78, normal: 130, large: 210 }
+
+function mkTr(type, dur) {
   const d = TRANSITIONS.find(t => t.id === type) || TRANSITIONS[1]
-  return { type: d.id, enabled: d.id !== 'cut', dur: d.dur || 0.8 }
+  return { type: d.id, enabled: d.id !== 'cut', dur: dur ?? (d.dur || 0.8) }
 }
 
 function renderBlend(ctx, fromEl, toEl, type, p, w, h) {
@@ -47,7 +57,7 @@ function renderBlend(ctx, fromEl, toEl, type, p, w, h) {
   }
 }
 
-// ── Player (supports video + image media) ────────────────────────
+// ── Player ───────────────────────────────────────────────────────
 function createPlayer(canvasRef, mediaRefs) {
   let playing=false, raf=null
   const cv  = () => canvasRef.current
@@ -128,30 +138,51 @@ function createPlayer(canvasRef, mediaRefs) {
 
 // ── Config Modal ─────────────────────────────────────────────────
 function ConfigModal({ files, onConfirm, onCancel }) {
-  const hasImages = files.some(f => f.type.startsWith('image/'))
-  const [durMode, setDurMode]   = useState(hasImages ? 'custom' : 'full')
-  const [customDur, setCustomDur] = useState('3')
-  const [defaultTr, setDefaultTr] = useState('dissolve')
+  const hasImages   = files.some(f => f.type.startsWith('image/'))
+  const [durMode,    setDurMode]    = useState(hasImages ? 'custom' : 'full')
+  const [customDur,  setCustomDur]  = useState('3')
+  const [defaultTr,  setDefaultTr]  = useState('dissolve')
+  const [trDur,      setTrDur]      = useState(0.8)
+  const [canvasId,   setCanvasId]   = useState('16:9-hd')
   const vidCount = files.filter(f=>f.type.startsWith('video/')).length
   const imgCount = files.filter(f=>f.type.startsWith('image/')).length
 
+  const selectTr = (id) => {
+    setDefaultTr(id)
+    const d = TRANSITIONS.find(t=>t.id===id)
+    if (d && d.dur > 0) setTrDur(d.dur)
+  }
+
   const confirm = () => {
-    const d = Math.max(0.5, parseFloat(customDur)||3)
-    onConfirm({ durMode: hasImages?'custom':durMode, customDur: d, defaultTr })
+    const d   = Math.max(0.5, parseFloat(customDur)||3)
+    const preset = CANVAS_PRESETS.find(p=>p.id===canvasId) || CANVAS_PRESETS[0]
+    onConfirm({ durMode: hasImages?'custom':durMode, customDur: d, defaultTr, defaultTrDur: trDur, canvasPreset: canvasId, canvasW: preset.w, canvasH: preset.h })
   }
 
   return (
     <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000,backdropFilter:'blur(6px)' }}>
-      <div style={{ background:'var(--surface)',borderRadius:16,border:'1px solid var(--border)',boxShadow:'0 24px 64px rgba(0,0,0,0.18)',width:480,padding:'28px 32px',maxHeight:'90vh',overflowY:'auto' }}>
+      <div style={{ background:'var(--surface)',borderRadius:16,border:'1px solid var(--border)',boxShadow:'0 24px 64px rgba(0,0,0,0.18)',width:500,padding:'28px 32px',maxHeight:'90vh',overflowY:'auto' }}>
         <h2 style={{ fontWeight:600,fontSize:17,marginBottom:4 }}>Configure Sequence</h2>
         <p style={{ color:'var(--text-muted)',fontSize:12,marginBottom:24 }}>
           {[vidCount>0&&`${vidCount} video${vidCount!==1?'s':''}`,imgCount>0&&`${imgCount} image${imgCount!==1?'s':''}`].filter(Boolean).join(' · ')}
         </p>
 
-        {/* Duration section */}
-        <p style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',marginBottom:12 }}>Clip Duration</p>
+        {/* Canvas / output size */}
+        <SectionLabel>Canvas Size</SectionLabel>
+        <div style={{ display:'flex',flexWrap:'wrap',gap:6,marginBottom:20 }}>
+          {CANVAS_PRESETS.map(p=>(
+            <button key={p.id} onClick={()=>setCanvasId(p.id)}
+              style={{ padding:'5px 12px',borderRadius:7,border:`1.5px solid ${canvasId===p.id?'#111':'var(--border)'}`,background:canvasId===p.id?'#111':'var(--bg)',color:canvasId===p.id?'#fff':'var(--text-secondary)',fontSize:12,fontWeight:canvasId===p.id?600:400,cursor:'pointer',fontFamily:'inherit',transition:'all 0.1s' }}>
+              {p.label}
+              <span style={{ fontSize:10,opacity:0.6,marginLeft:5 }}>{p.w}×{p.h}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Clip duration */}
+        <SectionLabel>Clip Duration</SectionLabel>
         {!hasImages && (
-          <label style={{ display:'flex',alignItems:'flex-start',gap:10,marginBottom:12,cursor:'pointer' }}>
+          <label style={{ display:'flex',alignItems:'flex-start',gap:10,marginBottom:10,cursor:'pointer' }}>
             <input type="radio" checked={durMode==='full'} onChange={()=>setDurMode('full')} style={{ marginTop:3,accentColor:'#111' }} />
             <div>
               <span style={{ fontSize:13,fontWeight:500 }}>Full video</span>
@@ -159,7 +190,7 @@ function ConfigModal({ files, onConfirm, onCancel }) {
             </div>
           </label>
         )}
-        <label style={{ display:'flex',alignItems:'flex-start',gap:10,marginBottom:20,cursor: hasImages?'default':'pointer' }}>
+        <label style={{ display:'flex',alignItems:'flex-start',gap:10,marginBottom:20,cursor:hasImages?'default':'pointer' }}>
           <input type="radio" checked={durMode==='custom'||hasImages} onChange={()=>setDurMode('custom')} disabled={hasImages} style={{ marginTop:7,accentColor:'#111' }} />
           <div>
             <div style={{ display:'flex',alignItems:'center',gap:8 }}>
@@ -170,23 +201,31 @@ function ConfigModal({ files, onConfirm, onCancel }) {
               />
               <span style={{ fontSize:13,color:'var(--text-muted)' }}>seconds</span>
             </div>
-            <p style={{ fontSize:11,color:'var(--text-muted)',marginTop:4 }}>
-              {hasImages
-                ? <>Images need an explicit duration.{vidCount>0?' Videos will also be trimmed to this length.':''}</>
-                : durMode==='custom' ? 'Drag a clip in the timeline to adjust where it starts.' : ''}
-            </p>
+            {hasImages && <p style={{ fontSize:11,color:'var(--text-muted)',marginTop:4 }}>Images need an explicit duration.{vidCount>0?' Videos also trimmed to this length.':''}</p>}
+            {!hasImages && durMode==='custom' && <p style={{ fontSize:11,color:'var(--text-muted)',marginTop:4 }}>Drag a clip in the timeline to adjust its start point.</p>}
           </div>
         </label>
 
-        {/* Transition section */}
-        <p style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',marginBottom:12 }}>Default Transition</p>
-        <div style={{ display:'flex',flexWrap:'wrap',gap:6,marginBottom:28 }}>
+        {/* Default transition */}
+        <SectionLabel>Default Transition</SectionLabel>
+        <div style={{ display:'flex',flexWrap:'wrap',gap:6,marginBottom: defaultTr!=='cut' ? 10 : 24 }}>
           {TRANSITIONS.map(t=>(
-            <button key={t.id} onClick={()=>setDefaultTr(t.id)} style={{ padding:'5px 12px',borderRadius:7,border:`1.5px solid ${defaultTr===t.id?'#111':'var(--border)'}`,background:defaultTr===t.id?'#111':'var(--bg)',color:defaultTr===t.id?'#fff':'var(--text-secondary)',fontSize:12,fontWeight:defaultTr===t.id?600:400,cursor:'pointer',fontFamily:'inherit',transition:'all 0.1s',display:'flex',alignItems:'center',gap:5 }}>
+            <button key={t.id} onClick={()=>selectTr(t.id)}
+              style={{ padding:'5px 12px',borderRadius:7,border:`1.5px solid ${defaultTr===t.id?'#111':'var(--border)'}`,background:defaultTr===t.id?'#111':'var(--bg)',color:defaultTr===t.id?'#fff':'var(--text-secondary)',fontSize:12,fontWeight:defaultTr===t.id?600:400,cursor:'pointer',fontFamily:'inherit',transition:'all 0.1s',display:'flex',alignItems:'center',gap:5 }}>
               <TransIcon type={t.id}/> {t.label}
             </button>
           ))}
         </div>
+
+        {/* Transition duration slider — only when a real transition is selected */}
+        {defaultTr!=='cut' && (
+          <div style={{ display:'flex',alignItems:'center',gap:12,marginBottom:24,paddingLeft:2 }}>
+            <span style={{ fontSize:12,color:'var(--text-muted)',whiteSpace:'nowrap' }}>Duration</span>
+            <input type="range" min={0.2} max={3} step={0.1} value={trDur} onChange={e=>setTrDur(parseFloat(e.target.value))}
+              style={{ flex:1,accentColor:'#111',cursor:'pointer' }}/>
+            <span style={{ fontSize:12,color:'var(--text-secondary)',fontVariantNumeric:'tabular-nums',minWidth:28,textAlign:'right' }}>{trDur.toFixed(1)}s</span>
+          </div>
+        )}
 
         <div style={{ display:'flex',justifyContent:'flex-end',gap:8 }}>
           <button onClick={onCancel} style={{ padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text-secondary)',fontSize:13,cursor:'pointer',fontFamily:'inherit' }}>Cancel</button>
@@ -195,6 +234,10 @@ function ConfigModal({ files, onConfirm, onCancel }) {
       </div>
     </div>
   )
+}
+
+function SectionLabel({ children }) {
+  return <p style={{ fontSize:11,fontWeight:600,textTransform:'uppercase',letterSpacing:'0.06em',color:'var(--text-muted)',marginBottom:10 }}>{children}</p>
 }
 
 // ── Transition pill ──────────────────────────────────────────────
@@ -256,14 +299,16 @@ function TransIcon({ type }) {
 }
 
 // ── Clip card with scrub ─────────────────────────────────────────
-function ClipCard({ clip, isActive, isDragging, onRemove, onDragStart, onScrub }) {
+function ClipCard({ clip, isActive, isDragging, cardW=130, onRemove, onDragStart, onScrub, onScrubFrame }) {
   const [scrubThumb,  setScrubThumb]  = useState(null)
   const [scrubOffset, setScrubOffset] = useState(null)
-  const scrubVidRef   = useRef(null)
-  const seekingRef    = useRef(false)
-  const pendingRef    = useRef(null)
-  const scrubActive   = useRef(false)
-  const latestThumb   = useRef(null)
+  const scrubVidRef      = useRef(null)
+  const seekingRef       = useRef(false)
+  const pendingRef       = useRef(null)
+  const scrubActive      = useRef(false)
+  const latestThumb      = useRef(null)
+  const onScrubFrameRef  = useRef(onScrubFrame)
+  onScrubFrameRef.current = onScrubFrame
 
   useEffect(()=>()=>{
     if (scrubVidRef.current) { URL.revokeObjectURL(scrubVidRef.current.src); scrubVidRef.current.src='' }
@@ -276,12 +321,15 @@ function ClipCard({ clip, isActive, isDragging, onRemove, onDragStart, onScrub }
     vid.muted=true; vid.preload='auto'
     vid.addEventListener('seeked',()=>{
       if (!scrubActive.current) { seekingRef.current=false; return }
-      const c=document.createElement('canvas')
       const vw=vid.videoWidth||1280, vh=vid.videoHeight||720
+      const c=document.createElement('canvas')
       c.width=260; c.height=Math.round(260*vh/vw)
       c.getContext('2d').drawImage(vid,0,0,c.width,c.height)
       const url=c.toDataURL('image/jpeg',0.7)
-      latestThumb.current=url; setScrubThumb(url)
+      latestThumb.current=url
+      setScrubThumb(url)
+      // Draw to main canvas for live preview
+      onScrubFrameRef.current?.(vid)
       seekingRef.current=false
       if (pendingRef.current!==null){ const t=pendingRef.current; pendingRef.current=null; seekingRef.current=true; vid.currentTime=t }
     })
@@ -321,15 +369,16 @@ function ClipCard({ clip, isActive, isDragging, onRemove, onDragStart, onScrub }
 
   const thumbSrc = scrubThumb||clip.thumb
   const fmtDur = s => s<60 ? `${s.toFixed(1)}s` : `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`
+  const isSmall = cardW <= 80
 
   return (
-    <div style={{ flexShrink:0,width:130,borderRadius:9,overflow:'hidden',border:`1.5px solid ${isActive?'#111':'var(--border)'}`,background:'var(--surface)',boxShadow:isDragging?'0 8px 24px rgba(0,0,0,0.18)':'0 1px 4px rgba(0,0,0,0.06)',opacity:isDragging?0.5:1,transition:'border-color 0.15s,opacity 0.15s',userSelect:'none' }}>
-      {/* Grip handle for reorder */}
+    <div style={{ flexShrink:0,width:cardW,borderRadius:9,overflow:'hidden',border:`1.5px solid ${isActive?'#111':'var(--border)'}`,background:'var(--surface)',boxShadow:isDragging?'0 8px 24px rgba(0,0,0,0.18)':'0 1px 4px rgba(0,0,0,0.06)',opacity:isDragging?0.5:1,transition:'border-color 0.15s,opacity 0.15s',userSelect:'none' }}>
+      {/* Grip handle */}
       <div onMouseDown={onDragStart} title="Drag to reorder"
-        style={{ display:'flex',alignItems:'center',justifyContent:'center',height:18,cursor:'grab',color:'var(--text-muted)',background:'var(--bg)',borderBottom:'1px solid var(--border)' }}>
+        style={{ display:'flex',alignItems:'center',justifyContent:'center',height:16,cursor:'grab',color:'var(--text-muted)',background:'var(--bg)',borderBottom:'1px solid var(--border)' }}>
         <GripIcon/>
       </div>
-      {/* Thumbnail — drag horizontally to scrub */}
+      {/* Thumbnail */}
       <div onMouseDown={handleThumbDown}
         style={{ position:'relative',aspectRatio:'16/9',background:'#111',overflow:'hidden',cursor:canScrub?'ew-resize':'default' }}>
         {thumbSrc
@@ -338,36 +387,40 @@ function ClipCard({ clip, isActive, isDragging, onRemove, onDragStart, onScrub }
         }
         {isActive&&<div style={{ position:'absolute',inset:0,border:'2px solid #111',borderRadius:7,pointerEvents:'none' }}/>}
         <button onClick={e=>{e.stopPropagation();onRemove()}}
-          style={{ position:'absolute',top:4,right:4,width:18,height:18,borderRadius:4,background:'rgba(0,0,0,0.65)',border:'none',color:'#fff',fontSize:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
-        {clip.type==='image'&&<div style={{ position:'absolute',top:4,left:4,background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:8,padding:'2px 5px',borderRadius:3,fontWeight:600 }}>IMG</div>}
+          style={{ position:'absolute',top:3,right:3,width:16,height:16,borderRadius:4,background:'rgba(0,0,0,0.65)',border:'none',color:'#fff',fontSize:9,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>
+        {clip.type==='image'&&<div style={{ position:'absolute',top:3,left:3,background:'rgba(0,0,0,0.6)',color:'#fff',fontSize:7,padding:'2px 4px',borderRadius:3,fontWeight:700 }}>IMG</div>}
         {canScrub&&scrubOffset!==null&&(
-          <div style={{ position:'absolute',bottom:4,left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,0.75)',color:'#fff',fontSize:9,padding:'2px 6px',borderRadius:4,whiteSpace:'nowrap',pointerEvents:'none' }}>
+          <div style={{ position:'absolute',bottom:3,left:'50%',transform:'translateX(-50%)',background:'rgba(0,0,0,0.78)',color:'#fff',fontSize:8,padding:'2px 5px',borderRadius:4,whiteSpace:'nowrap',pointerEvents:'none' }}>
             +{fmtDur(scrubOffset)}
           </div>
         )}
       </div>
-      {/* Footer */}
-      <div style={{ padding:'5px 8px' }}>
-        <p style={{ fontSize:10,color:'var(--text-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
-          {clip.file.name.replace(/\.[^/.]+$/,'')}
-        </p>
-        <p style={{ fontSize:9,color:'var(--text-muted)' }}>
-          {clip.duration>0
-            ? clip.clipDuration>0 ? `${fmtDur(clip.clipDuration)} / ${fmtDur(clip.duration)}` : fmtDur(clip.duration)
-            : clip.clipDuration>0 ? `${fmtDur(clip.clipDuration)}` : '…'}
-        </p>
-      </div>
+      {/* Footer — hide in small mode */}
+      {!isSmall && (
+        <div style={{ padding:'4px 7px' }}>
+          <p style={{ fontSize:9,color:'var(--text-secondary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap' }}>
+            {clip.file.name.replace(/\.[^/.]+$/,'')}
+          </p>
+          <p style={{ fontSize:8,color:'var(--text-muted)' }}>
+            {clip.duration>0
+              ? clip.clipDuration>0 ? `${fmtDur(clip.clipDuration)} / ${fmtDur(clip.duration)}` : fmtDur(clip.duration)
+              : clip.clipDuration>0 ? fmtDur(clip.clipDuration) : '…'}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
 
 // ── Main ─────────────────────────────────────────────────────────
 export default function SceneArranger() {
-  const [pageState, setPageState]     = useState('idle') // idle | configuring | ready
+  const [pageState, setPageState]     = useState('idle')
   const [pendingFiles, setPending]    = useState([])
-  const [config, setConfig]           = useState({ durMode:'full', customDur:3, defaultTr:'dissolve' })
+  const [config, setConfig]           = useState({ durMode:'full', customDur:3, defaultTr:'dissolve', defaultTrDur:0.8, canvasW:1280, canvasH:720 })
   const [clips, setClips]             = useState([])
   const [transitions, setTransitions] = useState([])
+  const [canvasDims, setCanvasDims]   = useState({ w:1280, h:720 })
+  const [timelineSize, setTimelineSize] = useState('normal')
   const [dragging, setDragging]       = useState(false)
   const [activeClip, setActiveClip]   = useState(null)
   const [isPlaying, setIsPlaying]     = useState(false)
@@ -375,15 +428,31 @@ export default function SceneArranger() {
   const [dragIdx, setDragIdx]         = useState(null)
   const [dragOverIdx, setDragOverIdx] = useState(null)
 
-  const canvasRef   = useRef(null)
-  const mediaRefs   = useRef({})
-  const playerRef   = useRef(null)
-  const inputRef    = useRef(null)
-  const addInputRef = useRef(null)
-  const timelineRef = useRef(null)
-  const dragOvRef   = useRef(null)
+  const canvasRef    = useRef(null)
+  const mediaRefs    = useRef({})
+  const playerRef    = useRef(null)
+  const inputRef     = useRef(null)
+  const addInputRef  = useRef(null)
+  const timelineRef  = useRef(null)
+  const dragOvRef    = useRef(null)
+  const handlePlayRef = useRef(null)
+  const isPlayingRef  = useRef(false)
+  isPlayingRef.current = isPlaying
 
   useEffect(()=>{ playerRef.current=createPlayer(canvasRef,mediaRefs); return()=>playerRef.current?.stop() },[])
+
+  // Spacebar play/pause
+  useEffect(()=>{
+    const h=(e)=>{
+      if (e.code!=='Space') return
+      const tag=(e.target?.tagName||'').toLowerCase()
+      if (tag==='input'||tag==='textarea') return
+      e.preventDefault()
+      handlePlayRef.current?.()
+    }
+    window.addEventListener('keydown',h)
+    return()=>window.removeEventListener('keydown',h)
+  },[])
 
   // Sync media elements
   useEffect(()=>{
@@ -405,7 +474,6 @@ export default function SceneArranger() {
     })
   },[clips])
 
-  // Load metadata + thumbnail for one clip
   const loadMeta = useCallback((clip, cfg) => {
     if (clip.type==='video'){
       const url=URL.createObjectURL(clip.file)
@@ -442,15 +510,18 @@ export default function SceneArranger() {
   const processFiles = useCallback((files, cfg) => {
     const newClips=files.map(f=>({
       id:`${f.name}_${Date.now()}_${Math.random()}`,
-      file:f,
-      type:f.type.startsWith('image/')?'image':'video',
+      file:f, type:f.type.startsWith('image/')?'image':'video',
       thumb:null, duration:0,
       clipDuration:f.type.startsWith('image/')?cfg.customDur:(cfg.durMode==='custom'?cfg.customDur:0),
       startOffset:0, nativeW:0, nativeH:0,
     }))
     setClips(prev=>{
       const updated=[...prev,...newClips]
-      setTransitions(tr=>{ const n=[...tr]; while(n.length<updated.length-1) n.push(mkTr(cfg.defaultTr)); return n.slice(0,updated.length-1) })
+      setTransitions(tr=>{
+        const n=[...tr]
+        while(n.length<updated.length-1) n.push(mkTr(cfg.defaultTr, cfg.defaultTrDur))
+        return n.slice(0,updated.length-1)
+      })
       return updated
     })
     newClips.forEach(cl=>loadMeta(cl,cfg))
@@ -463,8 +534,11 @@ export default function SceneArranger() {
   },[])
 
   const handleConfirmConfig = useCallback((cfg)=>{
-    setConfig(cfg); setPageState('ready')
-    processFiles(pendingFiles, cfg); setPending([])
+    setConfig(cfg)
+    setCanvasDims({ w: cfg.canvasW, h: cfg.canvasH })
+    setPageState('ready')
+    processFiles(pendingFiles, cfg)
+    setPending([])
   },[pendingFiles,processFiles])
 
   const handleAddMore = useCallback((files)=>{
@@ -475,6 +549,13 @@ export default function SceneArranger() {
 
   const handleScrub = useCallback((id, newOffset, newThumb)=>{
     setClips(prev=>prev.map(cl=>cl.id===id?{...cl,startOffset:newOffset,...(newThumb?{thumb:newThumb}:{})}:cl))
+  },[])
+
+  // Draw scrub video frame to the main canvas for live preview
+  const handleScrubFrame = useCallback((el)=>{
+    if (isPlayingRef.current) return
+    const c=canvasRef.current; if(!c) return
+    c.getContext('2d').drawImage(el,0,0,c.width,c.height)
   },[])
 
   const removeClip = useCallback((idx)=>{
@@ -489,6 +570,8 @@ export default function SceneArranger() {
     await playerRef.current?.play(clips,transitions,setActiveClip)
     setIsPlaying(false); setActiveClip(null)
   }
+  // Always keep ref current so the spacebar handler calls the latest version
+  handlePlayRef.current = handlePlay
 
   const handleExport = async()=>{
     if (!clips.length||exporting) return
@@ -506,7 +589,6 @@ export default function SceneArranger() {
     setExporting(false)
   }
 
-  // Drag-to-reorder
   const handleCardDragStart = (idx) => (e) => {
     e.preventDefault(); setDragIdx(idx); dragOvRef.current=idx
     const onMove=(mv)=>{
@@ -518,15 +600,16 @@ export default function SceneArranger() {
     }
     const onUp=()=>{
       window.removeEventListener('mousemove',onMove); window.removeEventListener('mouseup',onUp)
-      const ov=dragOvRef.current
-      setDragIdx(null); setDragOverIdx(null)
+      const ov=dragOvRef.current; setDragIdx(null); setDragOverIdx(null)
       if (ov!==null&&ov!==idx){
         setClips(prev=>{ const n=[...prev]; const [it]=n.splice(idx,1); n.splice(ov,0,it); return n })
-        setTransitions(prev=>{ const n=[...prev]; while(n.length<clips.length-1) n.push(mkTr(config.defaultTr)); return n.slice(0,clips.length-1) })
+        setTransitions(prev=>{ const n=[...prev]; while(n.length<clips.length-1) n.push(mkTr(config.defaultTr,config.defaultTrDur)); return n.slice(0,clips.length-1) })
       }
     }
     window.addEventListener('mousemove',onMove); window.addEventListener('mouseup',onUp)
   }
+
+  const cardW = CARD_WIDTHS[timelineSize]
 
   // ── Drop zone ───────────────────────────────────────────────
   if (pageState==='idle'||pageState==='configuring') return (
@@ -553,7 +636,7 @@ export default function SceneArranger() {
       </div>
       <input ref={inputRef} type="file" accept="video/*,image/*" multiple style={{ display:'none' }} onChange={e=>handleStartFiles(e.target.files)}/>
       <div style={{ display:'flex',gap:32,color:'var(--text-muted)',fontSize:12 }}>
-        {[['01','Drop clips & images'],['02','Set duration & transitions'],['03','Preview & export']].map(([n,t])=>(
+        {[['01','Drop clips & images'],['02','Set canvas, duration & transitions'],['03','Preview & export']].map(([n,t])=>(
           <div key={n} style={{ display:'flex',alignItems:'center',gap:7 }}>
             <span style={{ fontSize:10,fontWeight:700,color:'var(--text-primary)',opacity:0.35 }}>{n}</span><span>{t}</span>
           </div>
@@ -575,16 +658,22 @@ export default function SceneArranger() {
           <div style={{ width:1,height:16,background:'var(--border)' }}/>
           <div>
             <p style={{ fontWeight:500,fontSize:13 }}>Scene Arranger</p>
-            <p style={{ fontSize:11,color:'var(--text-muted)' }}>{clips.length} clip{clips.length!==1?'s':''} · {transitions.filter(t=>t.enabled&&t.type!=='cut').length} transition{transitions.filter(t=>t.enabled&&t.type!=='cut').length!==1?'s':''}</p>
+            <p style={{ fontSize:11,color:'var(--text-muted)' }}>
+              {clips.length} clip{clips.length!==1?'s':''} · {transitions.filter(t=>t.enabled&&t.type!=='cut').length} transition{transitions.filter(t=>t.enabled&&t.type!=='cut').length!==1?'s':''}
+              <span style={{ marginLeft:8,opacity:0.6 }}>{canvasDims.w}×{canvasDims.h}</span>
+            </p>
           </div>
         </div>
         <div style={{ display:'flex',gap:8,alignItems:'center' }}>
           <button onClick={()=>addInputRef.current?.click()} style={{ display:'flex',alignItems:'center',gap:6,padding:'7px 13px',borderRadius:7,background:'var(--surface-hover)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontWeight:500,fontSize:12,cursor:'pointer',fontFamily:'inherit' }}>+ Add clips</button>
           <input ref={addInputRef} type="file" accept="video/*,image/*" multiple style={{ display:'none' }} onChange={e=>handleAddMore(e.target.files)}/>
-          <button onClick={handlePlay} disabled={exporting} style={{ display:'flex',alignItems:'center',gap:7,padding:'7px 16px',borderRadius:7,background:isPlaying?'#ef4444':'var(--accent)',color:'#fff',border:'none',fontWeight:500,fontSize:13,cursor:'pointer',fontFamily:'inherit',transition:'background 0.1s' }}>
+          <button onClick={handlePlay} disabled={exporting}
+            style={{ display:'flex',alignItems:'center',gap:7,padding:'7px 16px',borderRadius:7,background:isPlaying?'#ef4444':'var(--accent)',color:'#fff',border:'none',fontWeight:500,fontSize:13,cursor:'pointer',fontFamily:'inherit',transition:'background 0.1s' }}>
             {isPlaying?<StopIcon/>:<PlayIcon/>}{isPlaying?'Stop':'Preview'}
+            {!isPlaying&&<span style={{ fontSize:10,opacity:0.55,marginLeft:2 }}>Space</span>}
           </button>
-          <button onClick={handleExport} disabled={isPlaying||exporting||!clips.length} style={{ display:'flex',alignItems:'center',gap:7,padding:'7px 15px',borderRadius:7,background:'var(--surface-hover)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontWeight:500,fontSize:12,cursor:exporting?'wait':'pointer',fontFamily:'inherit',opacity:isPlaying?0.5:1 }}>
+          <button onClick={handleExport} disabled={isPlaying||exporting||!clips.length}
+            style={{ display:'flex',alignItems:'center',gap:7,padding:'7px 15px',borderRadius:7,background:'var(--surface-hover)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontWeight:500,fontSize:12,cursor:exporting?'wait':'pointer',fontFamily:'inherit',opacity:isPlaying?0.5:1 }}>
             <ExportIcon/>{exporting?'Encoding…':'Export WebM'}
           </button>
         </div>
@@ -592,37 +681,54 @@ export default function SceneArranger() {
 
       {/* Canvas */}
       <div style={{ flex:1,background:'#0e0e0e',display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',minHeight:0,position:'relative' }}>
-        <canvas ref={canvasRef} width={1280} height={720} style={{ maxWidth:'100%',maxHeight:'100%',display:'block' }}/>
+        <canvas ref={canvasRef} width={canvasDims.w} height={canvasDims.h} style={{ maxWidth:'100%',maxHeight:'100%',display:'block' }}/>
         {!isPlaying&&clips.length>0&&(
           <div style={{ position:'absolute',display:'flex',flexDirection:'column',alignItems:'center',gap:8 }}>
-            <button onClick={handlePlay} style={{ width:56,height:56,borderRadius:'50%',background:'rgba(255,255,255,0.12)',border:'1.5px solid rgba(255,255,255,0.25)',backdropFilter:'blur(8px)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',transition:'transform 0.1s' }} onMouseEnter={e=>e.currentTarget.style.transform='scale(1.08)'} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
+            <button onClick={handlePlay}
+              style={{ width:56,height:56,borderRadius:'50%',background:'rgba(255,255,255,0.12)',border:'1.5px solid rgba(255,255,255,0.25)',backdropFilter:'blur(8px)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',transition:'transform 0.1s' }}
+              onMouseEnter={e=>e.currentTarget.style.transform='scale(1.08)'} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
               <PlayIcon size={22}/>
             </button>
-            <span style={{ color:'rgba(255,255,255,0.45)',fontSize:11 }}>Click to preview sequence</span>
+            <span style={{ color:'rgba(255,255,255,0.45)',fontSize:11 }}>Click or press Space to preview</span>
           </div>
         )}
       </div>
 
-      {/* Timeline */}
-      <div style={{ flexShrink:0,borderTop:'1px solid var(--border)',background:'var(--bg)',padding:'14px 20px',overflowX:'auto' }}>
-        <div ref={timelineRef} style={{ display:'flex',alignItems:'center',gap:0,width:'max-content',minWidth:'100%' }}>
-          {clips.map((clip,i)=>(
-            <div key={clip.id} style={{ display:'flex',alignItems:'center' }}>
-              <div data-clipidx={i}>
-                <ClipCard
-                  clip={clip} isActive={activeClip===i} isDragging={dragIdx===i}
-                  onRemove={()=>removeClip(i)}
-                  onDragStart={handleCardDragStart(i)}
-                  onScrub={(off,thumb)=>handleScrub(clip.id,off,thumb)}
-                />
-              </div>
-              {i<clips.length-1&&(
-                <div style={{ display:'flex',alignItems:'center',justifyContent:'center',padding:'0 10px',flexShrink:0 }}>
-                  <TransitionPill value={transitions[i]??mkTr('dissolve')} onChange={tr=>setTransitions(prev=>{ const n=[...prev]; while(n.length<=i) n.push(mkTr('dissolve')); n[i]=tr; return n })}/>
+      {/* Timeline header with size toggle */}
+      <div style={{ flexShrink:0,borderTop:'1px solid var(--border)',background:'var(--bg)' }}>
+        <div style={{ display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 20px 5px' }}>
+          <span style={{ fontSize:11,color:'var(--text-muted)',fontWeight:500 }}>Timeline</span>
+          <div style={{ display:'flex',gap:3 }}>
+            {(['small','normal','large']).map((sz,i)=>(
+              <button key={sz} onClick={()=>setTimelineSize(sz)}
+                style={{ padding:'3px 9px',borderRadius:5,border:`1px solid ${timelineSize===sz?'#111':'var(--border)'}`,background:timelineSize===sz?'#111':'transparent',color:timelineSize===sz?'#fff':'var(--text-muted)',fontSize:10,cursor:'pointer',fontFamily:'inherit',transition:'all 0.1s' }}>
+                {sz==='small'?'S':sz==='normal'?'M':'L'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ overflowX:'auto',padding:'6px 20px 14px' }}>
+          <div ref={timelineRef} style={{ display:'flex',alignItems:'center',gap:0,width:'max-content',minWidth:'100%' }}>
+            {clips.map((clip,i)=>(
+              <div key={clip.id} style={{ display:'flex',alignItems:'center' }}>
+                <div data-clipidx={i}>
+                  <ClipCard
+                    clip={clip} isActive={activeClip===i} isDragging={dragIdx===i}
+                    cardW={cardW}
+                    onRemove={()=>removeClip(i)}
+                    onDragStart={handleCardDragStart(i)}
+                    onScrub={(off,thumb)=>handleScrub(clip.id,off,thumb)}
+                    onScrubFrame={handleScrubFrame}
+                  />
                 </div>
-              )}
-            </div>
-          ))}
+                {i<clips.length-1&&(
+                  <div style={{ display:'flex',alignItems:'center',justifyContent:'center',padding:'0 8px',flexShrink:0 }}>
+                    <TransitionPill value={transitions[i]??mkTr('dissolve')} onChange={tr=>setTransitions(prev=>{ const n=[...prev]; while(n.length<=i) n.push(mkTr('dissolve')); n[i]=tr; return n })}/>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -636,5 +742,5 @@ function ExportIcon(){ return <svg width="12" height="12" viewBox="0 0 24 24" fi
 function FilmstripIcon({ size=20 }){ return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/></svg> }
 function UploadIcon({ color='#888' }){ return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> }
 function MiniSpinner(){ return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2.5"><style>{`@keyframes sa{to{transform:rotate(360deg)}} .sa{animation:sa 0.9s linear infinite;transform-origin:12px 12px}`}</style><circle className="sa" cx="12" cy="12" r="9" strokeDasharray="36 18"/></svg> }
-function GripIcon(){ return <svg width="12" height="8" viewBox="0 0 12 8" fill="currentColor"><rect y="0" width="12" height="1.5" rx="1"/><rect y="3.25" width="12" height="1.5" rx="1"/><rect y="6.5" width="12" height="1.5" rx="1"/></svg> }
+function GripIcon(){ return <svg width="12" height="6" viewBox="0 0 12 6" fill="currentColor"><rect y="0" width="12" height="1.2" rx="1"/><rect y="2.4" width="12" height="1.2" rx="1"/><rect y="4.8" width="12" height="1.2" rx="1"/></svg> }
 function IBtn({ onClick, title, children }){ return <button onClick={onClick} title={title} style={{ width:30,height:30,borderRadius:7,background:'transparent',color:'var(--text-secondary)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background 0.1s' }} onMouseEnter={e=>e.currentTarget.style.background='var(--surface-hover)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>{children}</button> }
