@@ -80,7 +80,7 @@ export default function BatchStudio() {
   const [autoFillProgress, setAutoFillProgress] = useState(0)
   // Options
   const [filter, setFilter] = useState('all')       // 'all' | 'pending' | 'set'
-  const [columns, setColumns] = useState(4)
+  const [cardWidth, setCardWidth] = useState(260)   // min card width in px
   const [outputFormat, setOutputFormat] = useState('png')
   const [outputQuality, setOutputQuality] = useState(0.88)
   const [outputRes, setOutputRes] = useState('original')
@@ -378,20 +378,19 @@ export default function BatchStudio() {
 
         <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
 
-        {/* Grid columns */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Columns</span>
-          {[2, 3, 4, 5, 6].map(n => (
-            <button key={n} onClick={() => setColumns(n)}
-              style={{
-                width: '24px', height: '24px', borderRadius: '5px', border: 'none',
-                background: columns === n ? '#111' : 'var(--surface-hover)',
-                color: columns === n ? '#fff' : 'var(--text-muted)',
-                fontSize: '11px', fontWeight: '500', cursor: 'pointer',
-                fontFamily: 'inherit', transition: 'all 0.1s',
-              }}
-            >{n}</button>
-          ))}
+        {/* Zoom slider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Zoom</span>
+          <input
+            type="range" min={140} max={520} step={10}
+            value={cardWidth}
+            onChange={e => setCardWidth(parseInt(e.target.value))}
+            style={{ width: '80px', accentColor: '#111', cursor: 'pointer' }}
+          />
+          <span style={{
+            fontSize: '11px', color: 'var(--text-secondary)',
+            fontVariantNumeric: 'tabular-nums', minWidth: '34px',
+          }}>{cardWidth}px</span>
         </div>
 
         <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
@@ -455,7 +454,7 @@ export default function BatchStudio() {
       <div style={{
         flex: 1, overflowY: 'auto', padding: '16px 20px',
         display: 'grid',
-        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        gridTemplateColumns: `repeat(auto-fill, minmax(${cardWidth}px, 1fr))`,
         gap: '10px',
         alignContent: 'start',
       }}>

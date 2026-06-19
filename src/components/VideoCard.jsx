@@ -13,7 +13,6 @@ export default function VideoCard({ videoFile, captured, onCapture, onUncapture 
   const pendingTimeRef = useRef(null)
 
   const [duration, setDuration] = useState(0)
-  const [aspect, setAspect] = useState('16 / 9')
   const [canvasSize, setCanvasSize] = useState({ w: 320, h: 180 })
   const [hoverFrac, setHoverFrac] = useState(null)
   const [isHovering, setIsHovering] = useState(false)
@@ -33,7 +32,6 @@ export default function VideoCard({ videoFile, captured, onCapture, onUncapture 
     vid.addEventListener('loadedmetadata', () => {
       const vw = vid.videoWidth || 1280
       const vh = vid.videoHeight || 720
-      setAspect(`${vw} / ${vh}`)
       const dw = 320
       const dh = Math.round(dw * vh / vw)
       setCanvasSize({ w: dw, h: dh })
@@ -114,7 +112,7 @@ export default function VideoCard({ videoFile, captured, onCapture, onUncapture 
         : '0 1px 3px rgba(0,0,0,0.06)',
       transition: 'border-color 0.15s, box-shadow 0.15s',
     }}>
-      {/* Image area */}
+      {/* Image area — canvas drives its own height so nothing ever crops */}
       <div
         onMouseMove={handleMouseMove}
         onMouseEnter={() => setIsHovering(true)}
@@ -122,26 +120,30 @@ export default function VideoCard({ videoFile, captured, onCapture, onUncapture 
         onClick={handleClick}
         style={{
           position: 'relative',
-          aspectRatio: aspect,
+          width: '100%',
           background: '#0e0e0e',
           cursor: !loaded ? 'default' : captured ? 'pointer' : 'crosshair',
           overflow: 'hidden',
           userSelect: 'none',
         }}
       >
+        {/* Canvas: width 100%, height auto — preserves native ratio, never crops */}
         <canvas
           ref={canvasRef}
           width={canvasSize.w}
           height={canvasSize.h}
-          style={{ width: '100%', height: '100%', display: 'block' }}
+          style={{ width: '100%', height: 'auto', display: 'block' }}
         />
 
-        {/* Loading */}
+        {/* Loading placeholder — padding-bottom trick keeps the correct ratio
+            before metadata arrives so the spinner box isn't 0-height */}
         {!loaded && (
           <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: '#181818',
+            // fallback height in case canvas hasn't rendered yet
+            minHeight: '80px',
           }}>
             <Spinner />
           </div>
