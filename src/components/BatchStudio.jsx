@@ -9,6 +9,13 @@ const AUTO_FILL_OPTIONS = [
   { label: '25%', value: 0.25, desc: '25% through' },
   { label: '50%', value: 0.5, desc: '50% through' },
 ]
+const RES_OPTIONS = [
+  { label: 'Original', value: 'original' },
+  { label: '1920px', value: '1920' },
+  { label: '1280px', value: '1280' },
+  { label: '960px', value: '960' },
+  { label: '640px', value: '640' },
+]
 
 async function captureVideoAt(file, frac) {
   return new Promise((resolve) => {
@@ -24,15 +31,42 @@ async function captureVideoAt(file, frac) {
       vid.currentTime = Math.max(0.001, t)
     })
     vid.addEventListener('seeked', () => {
+      const vw = vid.videoWidth || 1280
+      const vh = vid.videoHeight || 720
+      const scale = Math.min(1, 1280 / vw)
+      const cw = Math.round(vw * scale)
+      const ch = Math.round(vh * scale)
       const canvas = document.createElement('canvas')
-      canvas.width = 320; canvas.height = 180
-      canvas.getContext('2d').drawImage(vid, 0, 0, 320, 180)
+      canvas.width = cw; canvas.height = ch
+      canvas.getContext('2d').drawImage(vid, 0, 0, cw, ch)
       const dataUrl = canvas.toDataURL('image/png')
-      URL.revokeObjectURL(url)
-      vid.src = ''
+      URL.revokeObjectURL(url); vid.src = ''
       resolve(dataUrl)
     })
     vid.addEventListener('error', () => { URL.revokeObjectURL(url); resolve(null) })
+  })
+}
+
+async function processDataUrl(dataUrl, format, quality, maxWidth) {
+  if (format === 'png' && maxWidth === 'original') return { dataUrl, ext: 'png' }
+  return new Promise(resolve => {
+    const img = new Image()
+    img.onload = () => {
+      let w = img.width, h = img.height
+      if (maxWidth !== 'original') {
+        const mw = parseInt(maxWidth)
+        if (w > mw) { h = Math.round(h * mw / w); w = mw }
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = w; canvas.height = h
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+      const mime = format === 'jpg' ? 'image/jpeg' : 'image/png'
+      resolve({
+        dataUrl: canvas.toDataURL(mime, format === 'jpg' ? quality : 1),
+        ext: format === 'jpg' ? 'jpg' : 'png',
+      })
+    }
+    img.src = dataUrl
   })
 }
 
@@ -44,6 +78,12 @@ export default function BatchStudio() {
   const [autoFillOpen, setAutoFillOpen] = useState(false)
   const [autoFilling, setAutoFilling] = useState(false)
   const [autoFillProgress, setAutoFillProgress] = useState(0)
+  // Options
+  const [filter, setFilter] = useState('all')       // 'all' | 'pending' | 'set'
+  const [columns, setColumns] = useState(4)
+  const [outputFormat, setOutputFormat] = useState('png')
+  const [outputQuality, setOutputQuality] = useState(0.88)
+  const [outputRes, setOutputRes] = useState('original')
   const inputRef = useRef(null)
 
   const loadFiles = useCallback((files) => {
@@ -51,6 +91,7 @@ export default function BatchStudio() {
     if (!filtered.length) return
     setVideos(filtered.map((file, i) => ({ file, id: `${file.name}_${i}_${Date.now()}` })))
     setCaptures({})
+    setFilter('all')
   }, [])
 
   const onDrop = (e) => {
@@ -62,6 +103,12 @@ export default function BatchStudio() {
   const captureCount = Object.keys(captures).length
   const pendingCount = videos.length - captureCount
 
+  const filteredVideos = videos.filter(({ id }) => {
+    if (filter === 'pending') return !captures[id]
+    if (filter === 'set') return !!captures[id]
+    return true
+  })
+
   const handleAutoFill = async (option) => {
     setAutoFillOpen(false)
     const pending = videos.filter(v => !captures[v.id])
@@ -69,21 +116,15 @@ export default function BatchStudio() {
     setAutoFilling(true)
     setAutoFillProgress(0)
     let done = 0
-
     for (let i = 0; i < pending.length; i += BATCH_CONCURRENCY) {
       const batch = pending.slice(i, i + BATCH_CONCURRENCY)
-      await Promise.all(
-        batch.map(async ({ file, id }) => {
-          const dataUrl = await captureVideoAt(file, option.value)
-          if (dataUrl) {
-            setCaptures(prev => ({ ...prev, [id]: dataUrl }))
-          }
-          done++
-          setAutoFillProgress(done / pending.length)
-        })
-      )
+      await Promise.all(batch.map(async ({ file, id }) => {
+        const dataUrl = await captureVideoAt(file, option.value)
+        if (dataUrl) setCaptures(prev => ({ ...prev, [id]: dataUrl }))
+        done++
+        setAutoFillProgress(done / pending.length)
+      }))
     }
-
     setAutoFilling(false)
     setAutoFillProgress(0)
   }
@@ -95,21 +136,21 @@ export default function BatchStudio() {
       const zip = new JSZip()
       for (const { file, id } of videos) {
         if (!captures[id]) continue
-        const base64 = captures[id].split(',')[1]
-        const name = file.name.replace(/\.[^/.]+$/, '') + '.png'
-        zip.file(name, base64, { base64: true })
+        const { dataUrl, ext } = await processDataUrl(captures[id], outputFormat, outputQuality, outputRes)
+        const name = file.name.replace(/\.[^/.]+$/, '') + '.' + ext
+        zip.file(name, dataUrl.split(',')[1], { base64: true })
       }
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 5 } })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = url; a.download = 'thumbnails.zip'; a.click()
+      a.href = url; a.download = `thumbnails_${outputFormat}.zip`; a.click()
       URL.revokeObjectURL(url)
     } finally {
       setExporting(false)
     }
   }
 
-  // Drop zone screen
+  // ── Drop zone ─────────────────────────────────────────────────────────────
   if (!videos.length) {
     return (
       <div
@@ -117,21 +158,15 @@ export default function BatchStudio() {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         style={{
-          flex: 1,
-          display: 'flex', flexDirection: 'column',
+          flex: 1, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center',
           padding: '40px', gap: '36px',
         }}
       >
         <div style={{ textAlign: 'center' }}>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: '9px',
-            marginBottom: '8px',
-          }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', marginBottom: '8px' }}>
             <GridIcon size={20} />
-            <span style={{ fontSize: '18px', fontWeight: '600', letterSpacing: '-0.3px' }}>
-              Batch Thumbnails
-            </span>
+            <span style={{ fontSize: '18px', fontWeight: '600', letterSpacing: '-0.3px' }}>Batch Thumbnails</span>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
             Pick one thumbnail per video, download them all as a zip
@@ -141,8 +176,7 @@ export default function BatchStudio() {
         <div
           onClick={() => inputRef.current?.click()}
           style={{
-            width: '100%', maxWidth: '440px',
-            padding: '48px 40px',
+            width: '100%', maxWidth: '440px', padding: '48px 40px',
             border: `2px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
             borderRadius: '16px',
             background: dragging ? 'rgba(17,17,17,0.02)' : 'var(--surface)',
@@ -169,35 +203,16 @@ export default function BatchStudio() {
               or <span style={{ color: 'var(--text-primary)', textDecoration: 'underline' }}>browse</span> to select files
             </p>
           </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-            MP4, MOV, WebM, AVI · any number of files
-          </p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '11px' }}>MP4, MOV, WebM, AVI · any number of files</p>
         </div>
 
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          multiple
-          style={{ display: 'none' }}
-          onChange={(e) => loadFiles(e.target.files)}
-        />
+        <input ref={inputRef} type="file" accept="video/*" multiple
+          style={{ display: 'none' }} onChange={(e) => loadFiles(e.target.files)} />
 
-        {/* How it works */}
-        <div style={{
-          display: 'flex', gap: '32px',
-          color: 'var(--text-muted)', fontSize: '12px',
-        }}>
-          {[
-            ['01', 'Drop your folder'],
-            ['02', 'Hover to scrub · click to pick'],
-            ['03', 'Download all as ZIP'],
-          ].map(([n, t]) => (
+        <div style={{ display: 'flex', gap: '32px', color: 'var(--text-muted)', fontSize: '12px' }}>
+          {[['01', 'Drop your folder'], ['02', 'Hover to scrub · click to lock'], ['03', 'Download as ZIP']].map(([n, t]) => (
             <div key={n} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-              <span style={{
-                fontSize: '10px', fontWeight: '700',
-                color: 'var(--text-primary)', opacity: 0.35,
-              }}>{n}</span>
+              <span style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-primary)', opacity: 0.35 }}>{n}</span>
               <span>{t}</span>
             </div>
           ))}
@@ -207,11 +222,14 @@ export default function BatchStudio() {
   }
 
   const progress = videos.length > 0 ? captureCount / videos.length : 0
+  const extLabel = outputFormat.toUpperCase()
 
+  // ── Grid view ─────────────────────────────────────────────────────────────
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      onClick={() => setAutoFillOpen(false)}>
 
-      {/* Toolbar */}
+      {/* ── Main toolbar ── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '10px 20px',
@@ -225,47 +243,42 @@ export default function BatchStudio() {
             style={{
               width: '30px', height: '30px', borderRadius: '7px',
               background: 'transparent', color: 'var(--text-secondary)',
-              border: 'none', cursor: 'pointer', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
+              border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               transition: 'background 0.1s',
             }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             title="Load new folder"
-          >
-            <ArrowLeftIcon />
-          </button>
+          ><ArrowLeftIcon /></button>
           <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
           <div>
-            <p style={{ fontWeight: '500', fontSize: '13px' }}>
-              Batch Thumbnails
-            </p>
+            <p style={{ fontWeight: '500', fontSize: '13px' }}>Batch Thumbnails</p>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              {captureCount} of {videos.length} picked
-              {pendingCount > 0 ? ` · ${pendingCount} remaining` : ' · all done!'}
+              {captureCount} of {videos.length} locked
+              {pendingCount > 0 ? ` · ${pendingCount} pending` : ' · all done!'}
             </p>
           </div>
         </div>
 
         {/* Progress bar */}
         <div style={{
-          flex: 1, maxWidth: '200px',
-          height: '4px', borderRadius: '2px',
+          flex: 1, maxWidth: '180px',
+          height: '3px', borderRadius: '2px',
           background: 'var(--border)', overflow: 'hidden',
         }}>
           <div style={{
             height: '100%',
-            width: `${autoFilling ? autoFillProgress * 100 : progress * 100}%`,
-            background: autoFilling ? '#f59e0b' : (progress === 1 ? '#22c55e' : '#111'),
-            borderRadius: '2px',
-            transition: 'width 0.2s ease',
+            width: `${(autoFilling ? autoFillProgress : progress) * 100}%`,
+            background: autoFilling ? '#f59e0b' : progress === 1 ? '#22c55e' : '#111',
+            borderRadius: '2px', transition: 'width 0.2s ease',
           }} />
         </div>
 
         <div style={{ display: 'flex', gap: '7px', alignItems: 'center', flexShrink: 0 }}>
           {/* Auto-fill */}
           {pendingCount > 0 && !autoFilling && (
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
               <button
                 onClick={() => setAutoFillOpen(v => !v)}
                 style={{
@@ -274,40 +287,32 @@ export default function BatchStudio() {
                   background: 'var(--surface-hover)', color: 'var(--text-secondary)',
                   border: '1px solid var(--border)',
                   fontWeight: '500', fontSize: '12px', cursor: 'pointer',
-                  fontFamily: 'inherit', transition: 'all 0.1s',
+                  fontFamily: 'inherit',
                 }}
-              >
-                <WandIcon /> Auto-fill {pendingCount}
-              </button>
+              ><WandIcon /> Auto-fill {pendingCount}</button>
               {autoFillOpen && (
                 <div style={{
                   position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '10px',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                  zIndex: 50, overflow: 'hidden', minWidth: '180px',
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                  zIndex: 50, overflow: 'hidden', minWidth: '185px',
                 }}>
                   <div style={{ padding: '10px 12px 6px', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
-                    Set all pending to…
+                    Lock all pending frames at…
                   </div>
                   {AUTO_FILL_OPTIONS.map(opt => (
-                    <button key={opt.label}
-                      onClick={() => handleAutoFill(opt)}
+                    <button key={opt.label} onClick={() => handleAutoFill(opt)}
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 14px', background: 'none',
-                        border: 'none', cursor: 'pointer',
-                        fontSize: '13px', color: 'var(--text-primary)',
-                        fontFamily: 'inherit', transition: 'background 0.08s',
+                        padding: '8px 14px', background: 'none', border: 'none',
+                        cursor: 'pointer', fontSize: '13px', color: 'var(--text-primary)',
+                        fontFamily: 'inherit',
                       }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'none'}
                     >
                       {opt.label}
-                      <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {opt.desc}
-                      </span>
+                      <span style={{ marginLeft: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>{opt.desc}</span>
                     </button>
                   ))}
                 </div>
@@ -315,14 +320,12 @@ export default function BatchStudio() {
             </div>
           )}
 
-          {/* Auto-fill progress */}
           {autoFilling && (
             <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: '500' }}>
               Auto-filling… {Math.round(autoFillProgress * 100)}%
             </span>
           )}
 
-          {/* Download */}
           <button
             onClick={handleDownload}
             disabled={!captureCount || exporting}
@@ -331,38 +334,146 @@ export default function BatchStudio() {
               padding: '7px 15px', borderRadius: '7px',
               background: captureCount > 0 ? 'var(--accent)' : 'var(--border)',
               color: captureCount > 0 ? '#fff' : 'var(--text-muted)',
-              fontWeight: '500', fontSize: '13px',
-              border: 'none', cursor: captureCount > 0 ? 'pointer' : 'default',
-              transition: 'all 0.1s', fontFamily: 'inherit',
-              opacity: exporting ? 0.7 : 1,
+              fontWeight: '500', fontSize: '13px', border: 'none',
+              cursor: captureCount > 0 ? 'pointer' : 'default',
+              fontFamily: 'inherit', opacity: exporting ? 0.7 : 1,
+              transition: 'opacity 0.1s',
             }}
             onMouseEnter={e => { if (captureCount > 0 && !exporting) e.currentTarget.style.background = 'var(--accent-hover)' }}
             onMouseLeave={e => { if (captureCount > 0) e.currentTarget.style.background = 'var(--accent)' }}
           >
             <DownloadIcon />
-            {exporting ? 'Zipping…' : `Download ${captureCount} PNG${captureCount !== 1 ? 's' : ''}`}
+            {exporting ? 'Zipping…' : `Download ${captureCount} ${extLabel}${captureCount !== 1 ? 's' : ''}`}
           </button>
         </div>
       </div>
 
-      {/* Video grid */}
-      <div
-        style={{
-          flex: 1, overflowY: 'auto',
-          padding: '20px',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          gap: '12px',
-          alignContent: 'start',
-        }}
-        onClick={() => setAutoFillOpen(false)}
-      >
-        {videos.map(({ file, id }) => (
+      {/* ── Options bar ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+        padding: '7px 20px', gap: '20px',
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--bg)',
+        flexShrink: 0,
+      }}>
+
+        {/* Filter pills */}
+        <div style={{ display: 'flex', gap: '3px' }}>
+          {[
+            { key: 'all', label: `All (${videos.length})` },
+            { key: 'pending', label: `Pending (${pendingCount})` },
+            { key: 'set', label: `Locked (${captureCount})` },
+          ].map(({ key, label }) => (
+            <button key={key} onClick={() => setFilter(key)}
+              style={{
+                padding: '4px 10px', borderRadius: '5px', border: 'none',
+                background: filter === key ? '#111' : 'transparent',
+                color: filter === key ? '#fff' : 'var(--text-muted)',
+                fontSize: '11px', fontWeight: filter === key ? '600' : '400',
+                cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.1s',
+              }}
+            >{label}</button>
+          ))}
+        </div>
+
+        <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
+
+        {/* Grid columns */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Columns</span>
+          {[2, 3, 4, 5, 6].map(n => (
+            <button key={n} onClick={() => setColumns(n)}
+              style={{
+                width: '24px', height: '24px', borderRadius: '5px', border: 'none',
+                background: columns === n ? '#111' : 'var(--surface-hover)',
+                color: columns === n ? '#fff' : 'var(--text-muted)',
+                fontSize: '11px', fontWeight: '500', cursor: 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.1s',
+              }}
+            >{n}</button>
+          ))}
+        </div>
+
+        <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
+
+        {/* Format */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Format</span>
+          <div style={{ display: 'flex', gap: '3px' }}>
+            {['png', 'jpg'].map(f => (
+              <button key={f} onClick={() => setOutputFormat(f)}
+                style={{
+                  padding: '4px 10px', borderRadius: '5px', border: 'none',
+                  background: outputFormat === f ? '#111' : 'var(--surface-hover)',
+                  color: outputFormat === f ? '#fff' : 'var(--text-muted)',
+                  fontSize: '11px', fontWeight: outputFormat === f ? '600' : '400',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  textTransform: 'uppercase', letterSpacing: '0.02em',
+                  transition: 'all 0.1s',
+                }}
+              >{f}</button>
+            ))}
+          </div>
+          {outputFormat === 'jpg' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Quality</span>
+              <input type="range" min={50} max={100} step={1}
+                value={Math.round(outputQuality * 100)}
+                onChange={e => setOutputQuality(parseInt(e.target.value) / 100)}
+                style={{ width: '64px', accentColor: '#111', cursor: 'pointer' }}
+              />
+              <span style={{
+                fontSize: '11px', color: 'var(--text-secondary)',
+                fontVariantNumeric: 'tabular-nums', minWidth: '28px',
+              }}>
+                {Math.round(outputQuality * 100)}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div style={{ width: '1px', height: '16px', background: 'var(--border)' }} />
+
+        {/* Resolution */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Max size</span>
+          <select value={outputRes} onChange={e => setOutputRes(e.target.value)}
+            style={{
+              padding: '4px 8px', borderRadius: '5px',
+              border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text-primary)',
+              fontSize: '11px', fontFamily: 'inherit', cursor: 'pointer',
+              outline: 'none',
+            }}
+          >
+            {RES_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Grid ── */}
+      <div style={{
+        flex: 1, overflowY: 'auto', padding: '16px 20px',
+        display: 'grid',
+        gridTemplateColumns: `repeat(${columns}, 1fr)`,
+        gap: '10px',
+        alignContent: 'start',
+      }}>
+        {filteredVideos.length === 0 ? (
+          <div style={{
+            gridColumn: `1 / -1`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '60px 0', color: 'var(--text-muted)', fontSize: '13px',
+          }}>
+            No {filter === 'pending' ? 'pending' : 'locked'} videos
+          </div>
+        ) : filteredVideos.map(({ file, id }) => (
           <VideoCard
             key={id}
             videoFile={file}
             captured={captures[id]}
             onCapture={(url) => setCaptures(prev => ({ ...prev, [id]: url }))}
+            onUncapture={() => setCaptures(prev => { const n = { ...prev }; delete n[id]; return n })}
           />
         ))}
       </div>
