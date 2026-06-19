@@ -2,9 +2,11 @@ import { useState, useCallback } from 'react'
 import Dropzone from './components/Dropzone'
 import FrameStudio from './components/FrameStudio'
 import BatchStudio from './components/BatchStudio'
+import SceneCutter from './components/SceneCutter'
+import SceneArranger from './components/SceneArranger'
 
 export default function App() {
-  const [page, setPage] = useState('single') // 'single' | 'batch'
+  const [page, setPage] = useState('single') // 'single' | 'batch' | 'scene-cutter' | 'scene-arranger'
   const [video, setVideo] = useState(null)
 
   const handleVideoLoad = useCallback((file) => {
@@ -41,6 +43,12 @@ export default function App() {
           <NavTab active={page === 'batch'} onClick={() => switchPage('batch')}>
             <GridTabIcon /> Batch Thumbnails
           </NavTab>
+          <NavTab active={page === 'scene-cutter'} onClick={() => switchPage('scene-cutter')}>
+            <ScissorTabIcon /> Scene Cutter
+          </NavTab>
+          <NavTab active={page === 'scene-arranger'} onClick={() => switchPage('scene-arranger')}>
+            <FilmstripTabIcon /> Scene Arranger
+          </NavTab>
         </div>
       )}
 
@@ -50,8 +58,12 @@ export default function App() {
         ) : (
           <FrameStudio video={video} onReset={handleReset} />
         )
-      ) : (
+      ) : page === 'batch' ? (
         <BatchStudio />
+      ) : page === 'scene-cutter' ? (
+        <SceneCutter />
+      ) : (
+        <SceneArranger />
       )}
     </div>
   )
@@ -84,4 +96,10 @@ function FilmTabIcon() {
 }
 function GridTabIcon() {
   return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+}
+function ScissorTabIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+}
+function FilmstripTabIcon() {
+  return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="17" y1="7" x2="22" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/></svg>
 }
