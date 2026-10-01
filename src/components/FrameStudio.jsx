@@ -20,6 +20,7 @@ export default function FrameStudio({ video, onReset }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [previewFrame, setPreviewFrame] = useState(null) // for modal
   const [extractFrame, setExtractFrame] = useState(null) // for extract studio
+  const [remoteError, setRemoteError] = useState('')
   const [autoCapInterval, setAutoCapInterval] = useState(null) // null = off, number = seconds
   const [autoCapRunning, setAutoCapRunning] = useState(false)
   const [showAutoCapMenu, setShowAutoCapMenu] = useState(false)
@@ -31,17 +32,22 @@ export default function FrameStudio({ video, onReset }) {
     const onTime = () => setCurrentTime(vid.currentTime)
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
+    const onError = () => {
+      if (video.isRemote) setRemoteError('Could not load the video. The file may be private, or the server may block browser access. Make sure it is set to "Anyone with the link".')
+    }
     vid.addEventListener('loadedmetadata', onMeta)
     vid.addEventListener('timeupdate', onTime)
     vid.addEventListener('play', onPlay)
     vid.addEventListener('pause', onPause)
+    vid.addEventListener('error', onError)
     return () => {
       vid.removeEventListener('loadedmetadata', onMeta)
       vid.removeEventListener('timeupdate', onTime)
       vid.removeEventListener('play', onPlay)
       vid.removeEventListener('pause', onPause)
+      vid.removeEventListener('error', onError)
     }
-  }, [])
+  }, [video.isRemote])
 
   // Sync playback rate
   useEffect(() => {
@@ -60,7 +66,16 @@ export default function FrameStudio({ video, onReset }) {
     canvas.height = vid.videoHeight
     const ctx = canvas.getContext('2d')
     ctx.drawImage(vid, 0, 0)
-    const dataUrl = canvas.toDataURL('image/png')
+    let dataUrl
+    try {
+      dataUrl = canvas.toDataURL('image/png')
+    } catch (err) {
+      if (err.name === 'SecurityError') {
+        setRemoteError('Frame capture blocked by CORS — the video host does not allow cross-origin canvas access. Try downloading the file and loading it locally.')
+        return null
+      }
+      throw err
+    }
     const time = vid.currentTime
 
     setSelectedFrames(prev => {
@@ -301,8 +316,30 @@ export default function FrameStudio({ video, onReset }) {
           <video
             ref={videoRef}
             src={video.url}
+            crossOrigin={video.isRemote ? 'anonymous' : undefined}
             style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', borderRadius: '3px' }}
           />
+
+          {remoteError && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              padding: '24px', gap: '12px',
+            }}>
+              <div style={{ fontSize: '22px' }}>⚠️</div>
+              <p style={{ color: '#fff', fontSize: '13px', textAlign: 'center', maxWidth: '340px', lineHeight: 1.5 }}>
+                {remoteError}
+              </p>
+              <button onClick={onReset} style={{
+                marginTop: '4px', padding: '7px 16px', borderRadius: '8px',
+                background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fff', fontSize: '12px', cursor: 'pointer', fontFamily: 'inherit',
+              }}>
+                Go back
+              </button>
+            </div>
+          )}
 
           {/* Flash */}
           {captureFlash && (

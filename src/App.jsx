@@ -9,13 +9,17 @@ export default function App() {
   const [page, setPage] = useState('single') // 'single' | 'batch' | 'scene-cutter' | 'scene-arranger'
   const [video, setVideo] = useState(null)
 
-  const handleVideoLoad = useCallback((file) => {
-    const url = URL.createObjectURL(file)
-    setVideo({ file, url, name: file.name })
+  const handleVideoLoad = useCallback((input) => {
+    if (input?.isRemote) {
+      setVideo({ url: input.url, name: input.name, isRemote: true })
+    } else {
+      const url = URL.createObjectURL(input)
+      setVideo({ file: input, url, name: input.name })
+    }
   }, [])
 
   const handleReset = useCallback(() => {
-    if (video?.url) URL.revokeObjectURL(video.url)
+    if (video?.url && !video.isRemote) URL.revokeObjectURL(video.url)
     setVideo(null)
   }, [video])
 
